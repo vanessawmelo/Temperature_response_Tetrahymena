@@ -1,0 +1,1016 @@
+---
+title: Phenotypic responses to temperature in the ciliate *Tetrahymena thermophila*
+author: "Vanessa Weber de Melo"
+date: "27/05/2020"
+output:
+  html_document:
+    code_folding: "hide"
+    number_sections: false
+    toc: true
+    toc_float: 
+      collapsed: false
+      smooth_scroll: true
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+
+```
+
+# Study summary
+
+
+#### In this study, we grew four lineages of the ciliate *Tetrahymena thermophila* at 38 °C, a highly stressful temperature. We have monitored population abundances and two important morphological traits, cell size and cell shape, throughout the experiment. In the middle of the experiment, we moved half of the populations back to the control temperature of 20 °C, to evaluate possible costs related to the exposure to this high temperature environment.
+
+
+# Temperature range pilot experiment
+
+#### We performed a preliminary experiment to determine the temperature range in which this strain of *T. thermophila* (1630/1U) can grow.
+
+##### Load the growth data across 10 temperatures. 
+
+```{r load temperature range data, warning = F, message = F}
+
+library(tidyverse)
+library(ggpubr)
+library(here)
+library(patchwork)
+
+temperature_range_data <- read_csv(here("1-data/TempChoice_abundance_dryad.csv"))
+
+```
+
+##### Create a plot of population abundance through time for each population replicate, coloring them by growth temperature.
+
+### Figure 1 Population dynamics of *T. thermophila* strain 1630/1U growing in ten different temperatures. 
+#### Each line represents one replicate population and the colors indicate the temperature in which the population was grown.
+
+```{r fig 1, warning=F, fig.height = 6, fig.width=7, fig.align='center'}
+
+Temperature_ranges_plot <- ggplot(data = temperature_range_data, aes(x = day, y = mean_density, group = population, color = as.factor(temperature))) +
+  geom_point() +
+  geom_line() +
+  scale_y_log10() +
+  xlab("Day") +
+  ylab("Population density (cells/ml)") +
+  scale_color_manual(name = "Temperature (°C)", 
+                     values = c('#053061', '#2166ac', '#4393c3', '#92c5de',
+                                '#d1e5f0','#fddbc7','#f4a582','#d6604d','#b2182b', '#67001f')) +
+  theme(text = element_text(size = 15),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.position = "bottom",
+        plot.margin = unit(c(1,1,1.5,1.2),"cm"))
+
+Temperature_ranges_plot
+
+```
+
+
+# Temperature experiment
+
+### Figure 2B Experimental design of the temperature experiment. In the schematic of the experiment, each bottle represents one replicate batch culture, and the colors indicate the temperature in which the culture was grown. 
+
+```{r experimental design, fig.width=7, fig.align ='center', echo = F}
+knitr::include_graphics(path = here("1-data/Temperature_adaptation_experimental_design.png"))
+```
+
+##### Load the population abundance and the morphology data
+
+```{r load adaptation data, warning=FALSE, message=FALSE}
+# load the abundance data
+abundance_data <- read_csv(here("1-data/TempAdapt_abundances_dryad.csv"))
+
+# load the morphology data
+morphology_data <- read_csv(here("1-data/TempAdapt_morphology_dryad.csv"))
+
+```
+
+##### Calculate the total number of measured cells and the mean number of measured cells per population per day
+
+```{r number sampled cells}
+
+# total number of cells
+unique(morphology_data$id) %>% length()
+
+# mean number of cells plus standard error
+cells_summary <- morphology_data %>% group_by(population, date) %>% summarise(measured_cells = n())
+
+cells_summary %>% ungroup() %>% summarise(mean_measured_cells = mean(measured_cells), se_measured_cells = sd(measured_cells)/sqrt(n()))
+
+```
+
+##### Calculate mean, variance, standard deviation (sd) and standard error (se) of cell size and cell shape per population per day
+
+```{r calculate mean, var and se}
+
+# calculate mean, variance and sd of area and AR for each population for each day
+
+morphology_data_ts <- morphology_data %>% group_by(population, lineage, batch, date, day, temperature) %>%
+  summarise(mean_area_day = mean(mean_area), sd_area_day = sd(mean_area), 
+            se_area_day = sd(mean_area)/sqrt(n()), var_area_day = var(mean_area),
+            mean_AR_day = mean(mean_ar), sd_AR_day = sd(mean_ar), 
+            se_AR_day = sd(mean_ar)/sqrt(n()))
+
+```            
+
+##### Calculate coefficient of variation of cell area
+
+```{r calculate cv}
+
+# calculate coefficient of variation of cell area
+morphology_data_ts <- morphology_data_ts %>% mutate(cv_area_day = sd_area_day/mean_area_day)
+
+```
+
+##### Merge morphology and abundances dataset
+
+```{r merge datasets, warning=F, message = F}
+
+# merge both datasets
+morphology_abundance_data <- left_join(abundance_data, morphology_data_ts)
+
+# add name column for plotting (lineage + temperature)
+morphology_abundance_data <- morphology_abundance_data %>% mutate(name = paste0(lineage, "_", temperature))
+
+```
+
+##### Calculate number of generations in each batch
+
+```{r calculate generations, warning=F, message=F}
+
+# number of generations per batch ####
+generations <- morphology_abundance_data %>% group_by(population, lineage, batch,replicate, temperature) %>% 
+  summarise(maxi_density = max(mean_density), min_density = min(mean_density),
+            number_generations = (log(max(mean_density)) - log(min(mean_density)))/log(2))
+
+generations_summary <- generations %>% group_by(batch, temperature) %>% summarise(mean_generations_batch = mean(number_generations))
+
+# create a tibble with the number of generations per batch at each temperature
+generations_summary <- generations_summary %>% group_by(batch) %>% pivot_wider(names_from =  temperature, values_from = mean_generations_batch, names_prefix = "generations_")
+
+# round the number of generations
+generations_summary <- generations_summary %>% mutate(text_plot = case_when(
+  batch == 1 ~ paste0(round(generations_20, digits = 0), " gen."),
+  batch == 2 | batch == 3 ~ paste0(round(generations_38, digits = 0), " gen."),
+  batch > 3 ~ paste0(round(generations_20, digits = 0), " gen. 20°C \n", round(generations_38, digits = 0), " gen. 38°C")))
+
+```
+
+##### Plot time series of population abundance
+
+```{r abundances plot, warning = F}
+
+# define size of small and large fonts for the plot
+small_font <- 10
+large_font <- 13
+  
+plot_abundances <- ggplot(data = morphology_abundance_data) +
+  geom_point(aes(x = batch_day, y = mean_density, group = population, colour = name), size = 1) + 
+  geom_line(aes(x = batch_day, y = mean_density, group = population, colour = name)) +
+  geom_label(data = generations_summary, aes(x = 9, y = 500, label = text_plot), size = 2.1) +
+  scale_y_log10() +
+  ylab("Population density\n(cells/ml)") +
+  xlab("") +
+  scale_color_manual(values = c("#d2e0ee", "#efd0d4", "#90b2d5", "#d88b95", "#4d84bc","#c14655", "#2166ac","#b2182b", "red", "blue"), 
+                     guide = F, name = "Population and\n temperature", 
+                     labels = as_labeller(c("1_20" = "Pop. 1 20°C", "1_38" = "Pop. 1 38°C",
+                                            "2_20" = "Pop. 2 20°C", "2_38" = "Pop. 2 38°C",
+                                            "3_20" = "Pop. 3 20°C", "3_38" = "Pop. 3 38°C", 
+                                            "4_20" = "Pop. 4 20°C", "4_38" = "Pop. 4 38°C"))) +
+  scale_x_continuous(breaks = c(5, 10)) +
+  theme(text = element_text(size = large_font),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.position = "bottom",
+        plot.margin = unit(c(0, 1.5, 0 , 1.5 ),"cm")) +
+  facet_wrap(~ batch, ncol = 5, labeller = as_labeller(c("1" = "Batch 1", "2" = "Batch 2", 
+                                                          "3" = "Batch 3", "4" = "Batch 4", "5" = "Batch 5"))) 
+
+
+```
+
+##### Plot time series of each morphology measurement
+
+```{r morphology plots, warning=FALSE}
+
+# minimum and maximum cell area in the control
+area_min <- morphology_abundance_data %>% ungroup() %>% filter(batch == 1 & day > 0) %>% 
+  select(mean_area_day) %>% min()
+area_max <- morphology_abundance_data %>% ungroup() %>% filter(batch == 1 & day > 0) %>% 
+  select(mean_area_day) %>% max()
+
+# plot cell area
+plot_cell_area <- ggplot(data = morphology_abundance_data, aes(x = batch_day, y = mean_area_day, 
+                                                               group = population, col = name)) +
+  geom_point(size = 1) +
+  geom_hline(aes(yintercept = area_min), linetype = "dashed") +
+  geom_hline(aes(yintercept = area_max), linetype = "dashed") +
+  geom_errorbar(aes(ymin = mean_area_day - se_area_day, ymax = mean_area_day + se_area_day, width = 0.9), size = 0.2) +
+  geom_line() +
+  xlab("") +
+  ylab("Cell size (um2)") +
+  scale_color_manual(values = c("#d2e0ee", "#efd0d4", "#90b2d5", "#d88b95", "#4d84bc","#c14655", "#2166ac","#b2182b"),
+                     name = "Population and\n temperature", 
+                     labels = as_labeller(c("1_20" = "Pop. 1 20°C", "1_38" = "Pop. 1 38°C",
+                                            "2_20" = "Pop. 2 20°C", "2_38" = "Pop. 2 38°C",
+                                            "3_20" = "Pop. 3 20°C", "3_38" = "Pop. 3 38°C",
+                                            "4_20" = "Pop. 4 20°C", "4_38" = "Pop. 4 38°C"))) +
+  scale_x_continuous(breaks = c(5, 10)) +
+  theme(text = element_text(size = large_font), legend.text = element_text(size = small_font),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.position = "bottom", strip.text = element_blank(), 
+        plot.margin = unit(c(0, 1.5, 0 ,1.5 ),"cm")) +
+  facet_wrap(~ batch, ncol = 5, labeller = as_labeller(c("1" = "Batch 1", "2" = "Batch 2", 
+                                                         "3" = "Batch 3", "4" = "Batch 4", "5" = "Batch 5")))
+
+
+# minimum and maximum cv of cell area in the control
+cv_area_min <- morphology_abundance_data %>% ungroup() %>% filter(batch == 1 & day > 0) %>% 
+  select(cv_area_day) %>% min()
+cv_area_max <- morphology_abundance_data %>% ungroup() %>% filter(batch == 1 & day > 0) %>% 
+  select(cv_area_day) %>% max()
+
+# plot coefficient of variation of cell area
+# multiply cv per 100 to obtain percentage
+plot_cv_cell_area <- ggplot(data = morphology_abundance_data, aes(x = batch_day, y = cv_area_day*100, 
+                                                                  group = population, col = name)) +
+  geom_point(size = 1) +
+  geom_hline(aes(yintercept = cv_area_min*100), linetype = "dashed") +
+  geom_hline(aes(yintercept = cv_area_max*100), linetype = "dashed") +
+  geom_line() +
+  xlab("") +
+  ylab("Coefficient of variation\n of cell size (%)") +
+  scale_color_manual(values = c("#d2e0ee", "#efd0d4", "#90b2d5", "#d88b95", "#4d84bc","#c14655", "#2166ac","#b2182b"),
+                     name = "Population and\n temperature", 
+                     labels = as_labeller(c("1_20" = "Pop. 1 20°C", "1_38" = "Pop. 1 38°C",
+                                            "2_20" = "Pop. 2 20°C", "2_38" = "Pop. 2 38°C",
+                                            "3_20" = "Pop. 3 20°C", "3_38" = "Pop. 3 38°C",
+                                            "4_20" = "Pop. 4 20°C", "4_38" = "Pop. 4 38°C"))) +
+  scale_x_continuous(breaks = c(5, 10)) +
+  scale_y_continuous(breaks = c(15, 30, 45, 60)) +
+  theme(text = element_text(size = large_font), legend.text = element_text(size = small_font),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.position = "bottom", strip.text = element_blank(), 
+        plot.margin = unit(c(0, 1.5, 0, 1.5 ),"cm")) +
+  facet_wrap(~ batch, ncol = 5, labeller = as_labeller(c("1" = "Batch 1", "2" = "Batch 2", 
+                                                         "3" = "Batch 3", "4" = "Batch 4", "5" = "Batch 5")))
+
+
+# minimum and maximum variance of cell area in the control
+var_area_min <- morphology_abundance_data %>% ungroup() %>% filter(batch == 1 & day > 0) %>% 
+  select(var_area_day) %>% min()
+var_area_max <- morphology_abundance_data %>% ungroup() %>% filter(batch == 1 & day > 0) %>% 
+  select(var_area_day) %>% max()
+
+# plot variance of cell area
+plot_var_cell_area <-  ggplot(data = morphology_abundance_data, aes(x = batch_day, y = var_area_day, group = population, col = name)) +
+  geom_point(size = 1) +
+  geom_hline(aes(yintercept = var_area_min), linetype = "dashed") +
+  geom_hline(aes(yintercept = var_area_max), linetype = "dashed") +
+  geom_line() +
+  xlab("Day") +
+  ylab("Variance of\n cell size")  +
+  scale_color_manual(values = c("#d2e0ee", "#efd0d4", "#90b2d5", "#d88b95", "#4d84bc","#c14655", "#2166ac","#b2182b"),
+                     name = "Population and\n temperature", 
+                     labels = as_labeller(c("1_20" = "Pop. 1 20°C", "1_38" = "Pop. 1 38°C",
+                                            "2_20" = "Pop. 2 20°C", "2_38" = "Pop. 2 38°C",
+                                            "3_20" = "Pop. 3 20°C", "3_38" = "Pop. 3 38°C",
+                                            "4_20" = "Pop. 4 20°C", "4_38" = "Pop. 4 38°C"))) +
+  scale_x_continuous(breaks = c(5, 10)) +
+  theme(text = element_text(size = large_font), legend.text = element_text(size = small_font),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.position = "bottom", strip.text = element_blank(), 
+        plot.margin = unit(c(0, 1.5, 0 ,1.5 ),"cm")) +
+  facet_wrap(~ batch, ncol = 5, labeller = as_labeller(c("1" = "Batch 1", "2" = "Batch 2", 
+                                                         "3" = "Batch 3", "4" = "Batch 4", "5" = "Batch 5")))
+# minimum and maximum cell aspect ratio in the control
+AR_min <- morphology_abundance_data %>% ungroup() %>% filter(batch == 1 & day > 0) %>% 
+  select(mean_AR_day) %>% min()
+AR_max <- morphology_abundance_data %>% ungroup() %>% filter(batch == 1 & day > 0) %>% 
+  select(mean_AR_day) %>% max()
+
+# plot cell aspect ratio
+plot_cell_AR <- ggplot(data = morphology_abundance_data, aes(x = batch_day, y = mean_AR_day, 
+                                                             group = population, col = name)) +
+  geom_point(size = 1) +
+  geom_hline(aes(yintercept = AR_min), linetype = "dashed") +
+  geom_hline(aes(yintercept = AR_max), linetype = "dashed") +
+  geom_errorbar(aes(ymin = mean_AR_day - se_AR_day, ymax = mean_AR_day + se_AR_day, width = 0.9), size = 0.2) +
+  geom_line() +
+  xlab("") +
+  ylab("Cell shape")  +
+  scale_color_manual(values = c("#d2e0ee", "#efd0d4", "#90b2d5", "#d88b95", "#4d84bc","#c14655", "#2166ac","#b2182b"),
+                     name = "Population and\n temperature", 
+                     labels = as_labeller(c("1_20" = "Pop. 1 20°C", "1_38" = "Pop. 1 38°C",
+                                            "2_20" = "Pop. 2 20°C", "2_38" = "Pop. 2 38°C",
+                                            "3_20" = "Pop. 3 20°C", "3_38" = "Pop. 3 38°C",
+                                            "4_20" = "Pop. 4 20°C", "4_38" = "Pop. 4 38°C"))) +
+  scale_x_continuous(breaks = c(5, 10)) +
+  theme(text = element_text(size = large_font), legend.text = element_text(size = small_font),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"),
+        legend.position = "bottom", strip.text = element_blank(), 
+        plot.margin = unit(c(0, 1.5, 0 ,1.5 ),"cm")) +
+  facet_wrap(~ batch, ncol = 5, labeller = as_labeller(c("1" = "Batch 1", "2" = "Batch 2", 
+                                                         "3" = "Batch 3", "4" = "Batch 4", "5" = "Batch 5")))
+
+```
+
+### Figure 3 Population dynamics and morphological traits of each *T. thermophila* population during the temperature experiment. 
+#### Population density (A), mean cell size (B), variance of cell size (C), coefficient of variation of cell size (D) and mean cell shape (E) are shown for each population and for each batch separately. Minimum number of generations that took place in each batch is shown in boxes in plot A. Error bars indicate standard errors of means for cell size and cell shape (B and E). The colors indicate the temperature in which the population was grown, and the shade represents the population replicate. Dashed lines mark the range of observed values at the control temperature (20 °C) in the first batch of the experiment.
+
+```{r fig 3, warning=FALSE, fig.height=18.5, fig.width=12.5}
+
+# all plots in one figure
+all_time_series <- ggarrange(plot_abundances, plot_cell_area, plot_var_cell_area, plot_cv_cell_area, plot_cell_AR,
+                             nrow = 5, common.legend = T, legend = "bottom", align = "hv", 
+                             labels = "AUTO")
+
+# print the plot
+all_time_series
+
+```
+
+##### Estimate growth rate and lag phase in each population using the Gompertz model. 
+
+```{r gompertz model, warning=F, message=F}
+# load the package growthrates
+library(growthrates)
+
+# select only relevant data for growth model (population, population density and temperature)
+# exclude populations 32, 141 and 341, since model will be run separetely for them
+data_subset1 <- morphology_abundance_data %>%
+  group_by(population, lineage, batch, replicate, temperature) %>% 
+  select(population, mean_density, batch_day) %>%
+  filter(!population %in% c("32", "141", "341"))
+
+# set parameters to start the model (p), lower boundary and upper boundary
+# y0 =  initial population density, mumax = maximum growth rate, K = carrying capacity, lambda = lag phase
+
+p     <- c(y0 = 100,   mumax = 1,   K = 1000000, lambda = 5)
+lower <- c(y0 = 0,      mumax = 0,   K = 100000,  lambda = 0)
+upper <- c(y0 = 5000,   mumax = 15,  K = 5000000, lambda = 8)
+
+# run gompertz model with lag phase estimation for each population separately
+subset1_gompertz3 <- all_growthmodels(
+  mean_density ~ grow_gompertz3(batch_day, parms) | population,
+  data = data_subset1,
+  p = p, lower = lower, upper = upper,
+  log = "y", ncores = 4)
+
+```
+
+##### Check model fit and coeficients.
+
+```{r check gompertz model, warning=F, message=F, include = T}
+# check the rsquared of the models
+
+# r squared of the model
+rsquared(subset1_gompertz3) > 0.9
+rsquared(subset1_gompertz3) # all above 0.90, expect pop. 241, with 0.80
+
+# coefficients of the model
+coef(subset1_gompertz3)
+
+# plot the model, y in log scale
+par(mfrow = c(8, 4))
+par(mar = c(2.5, 4, 2, 1))
+plot(subset1_gompertz3)
+plot(subset1_gompertz3, log = "y")
+
+```
+
+#### Gompertz model for populations that need specific parameters
+
+```{r gompertz model difficult fitting pop, warning=F, fig.height = 5, fig.width=12.5}
+
+# populations 32, 141, 341 presented suboptimal fittings with the above parameters
+# model these populations separately
+
+# population 32, remove last day since population is already crashing
+pop32 <- morphology_abundance_data %>%
+  group_by(population, lineage, batch, replicate, temperature) %>% 
+  select(population, mean_density, batch_day) %>% 
+  filter(population == 32 & batch_day < 12)
+
+# same parameters as previous populations
+pop32_gompertz <- fit_growthmodel(FUN = grow_gompertz3, p = p,
+                                  pop32$batch_day, pop32$mean_density,
+                                  lower = lower, upper = upper)
+
+# # population 141
+pop141 <- morphology_abundance_data %>%
+  group_by(population, lineage, batch, replicate, temperature) %>%
+  select(population, mean_density, batch_day) %>%
+  filter(population == 141 & batch_day < 6)
+
+# use new parameters
+p2     <- c(y0 = 500,    mumax = 1, K = 1000000, lambda = 0.1)
+lower2 <- c(y0 = 0,      mumax = 0,   K = 100000,   lambda = 0)
+upper2 <- c(y0 = 10000,   mumax = 30,  K = 5000000, lambda = 4)
+
+pop141_gompertz <- fit_growthmodel(FUN = grow_gompertz3, p = p,
+                                   pop141$batch_day, pop141$mean_density,
+                                   lower = lower, upper = upper)
+
+
+# population 341, remove final day that population is crashing
+pop341 <- morphology_abundance_data %>%
+  group_by(population, lineage, batch, replicate, temperature) %>% 
+  select(population, mean_density, batch_day) %>%
+  filter(population == 341 & batch_day <= 5)
+
+# rsquared of the model is very low, manually estimate growth rate and lag phase
+
+pop341_day0 <- pop341 %>% filter(batch_day == 0)
+pop341_day3 <- pop341 %>% filter(batch_day == 3)
+
+# calculate maximum growth rate as the log difference in population density divided by the time difference
+mumax <- (log10(pop341_day3$mean_density) - log10(pop341_day0$mean_density))/(pop341_day3$batch_day - pop341_day0$batch_day)
+lambda <- 0 # define lag phase as 0
+y0 <- NA
+K <- NA
+population <- 341
+
+pop341_manual_growth <- tibble(mumax, lambda, y0, K, population)
+
+
+remove(mumax, lambda, y0, K, population)
+
+```
+
+##### Check model fit and coeficients.
+
+```{r check gompertz model difficult fittings, warning=F, message=F, include = T}
+
+# pop 32
+rsquared(pop32_gompertz)
+coef(pop32_gompertz)
+par(mfrow = c(1,2))
+plot(pop32_gompertz)
+plot(pop32_gompertz, log = "y")
+
+
+# pop 141
+
+rsquared(pop141_gompertz)
+coef(pop141_gompertz)
+par(mfrow = c(1,2))
+plot(pop141_gompertz)
+plot(pop141_gompertz, log = "y")
+```
+
+##### Obtain model predictions
+
+```{r predictions gompertz model, warning=F, message=F, include = T}
+
+# try to get the model predictions for all gompertz models
+
+# new time variable with the maximum batch_day across all populations (12)
+time <- data.frame(time = seq(from = 0, to = 12, by = 1))
+
+# predict function for each problematic population, add name of the population to the tibble
+pop32_growth_prediction <- pop32_gompertz %>% predict(newdata = time) %>% as_tibble() %>% dplyr::rename(batch_day = time, mean_density_predict = y) %>% mutate(population = "32")
+pop141_growth_prediction <- pop141_gompertz %>% predict(newdata = time) %>% as_tibble() %>% dplyr::rename(batch_day = time, mean_density_predict = y) %>% mutate(population = "141")
+
+# predict function for each the remaining populations
+subset1_growth_prediction <- predict(subset1_gompertz3, newdata = time)
+names(subset1_growth_prediction)
+
+# transform list into data frame with population as a column
+subset1_growth_prediction <- map_df(subset1_growth_prediction, ~as.data.frame(.x), .id = "population")
+
+# rename the columns
+subset1_growth_prediction <- subset1_growth_prediction %>% dplyr::rename(batch_day = time, mean_density_predict = y)
+
+# merge all models
+prediction_gompertz <- bind_rows(subset1_growth_prediction, pop32_growth_prediction, pop141_growth_prediction)
+prediction_gompertz$population <- as.numeric(prediction_gompertz$population)
+
+morphology_abundance_data_gompertz <- morphology_abundance_data %>% left_join(prediction_gompertz)
+
+
+```
+
+#### Merge all growth model estimates
+
+```{r tidy growth data, warning=F}
+
+# create a dataset with the coeficients of the model
+coef_gompertz <- coef(subset1_gompertz3) %>% as_tibble()
+coef_gompertz <- cbind(coef_gompertz, population = as.double(names(subset1_gompertz3)))
+
+coef_gompertz <- coef_gompertz %>% rbind(c(coef(pop32_gompertz),  32))
+coef_gompertz <- coef_gompertz %>% rbind(c(coef(pop141_gompertz),  141))
+coef_gompertz <- coef_gompertz %>% rbind(pop341_manual_growth)
+
+# select metadata from the original dataset
+metadata <- morphology_abundance_data %>% select(population, lineage, batch, replicate, temperature) %>% distinct()
+
+# add metadata to the growth model coeficients data
+coef_gompertz <- coef_gompertz %>% left_join(metadata)
+
+# add name column for plotting (lineage + temperature)
+coef_gompertz <- coef_gompertz %>% mutate(name = paste0(lineage, "_", temperature))
+
+
+```
+
+
+### Figure 4 Growth dynamics of *T. thermophila* during the temperature experiment. 
+#### Gompertz model was used to estimate demographic parameters. (A) Points show population abundances and lines show the fitting of the model. No model fit is shown for population 3 in batch 4 at 38 °C since growth parameters were manually calculated (see methods). Maximum growth rate (B) and lag phase (C) of each *T. thermophila* population per batch culture. In all plots, the colors indicate the temperature in which the population was grown, and the shades represent the population replicate. The lag phases in batch 1 are estimated as smaller than 1x10-5 and are not visible in the plot.
+
+
+```{r fig_4, warning=F, fig.height = 10, fig.width=12.5}
+
+
+# define font sizes
+small_font <- 10
+large_font <- 13
+
+# plot the lag phase length (lambda)
+plot_lambda <- ggplot(coef_gompertz, aes(x = batch, y = lambda, fill = name, group = population)) +
+  geom_col(position = "dodge") +
+  xlab("") +
+  ylab("Lag phase (days)") +
+  scale_fill_manual(values = c("#d2e0ee", "#efd0d4", "#90b2d5", "#d88b95", "#4d84bc","#c14655", "#2166ac","#b2182b"),
+                    name = "Population and\n temperature",
+                    labels = as_labeller(c("1_20" = "Pop. 1 20°C", "1_38" = "Pop. 1 38°C",
+                                           "2_20" = "Pop. 2 20°C", "2_38" = "Pop. 2 38°C",
+                                           "3_20" = "Pop. 3 20°C", "3_38" = "Pop. 3 38°C",
+                                           "4_20" = "Pop. 4 20°C", "4_38" = "Pop. 4 38°C"))) +
+  guides(fill = guide_legend(title.theme = element_text(size = small_font), label.theme = element_text(size = small_font))) +
+  theme(text = element_text(size = large_font),
+        panel.border = element_rect(colour = "black", fill = NA),
+        panel.background = element_blank(),
+        legend.position = "right",
+        #plot.margin = margin(t = 10, r = 10, b = 10, l = 10),
+        axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank()) + #,
+  facet_grid(~batch, scales = "free_x", 
+             labeller = as_labeller(c("1" = "Batch 1", "2" = "Batch 2", 
+                                      "3" = "Batch 3", "4" = "Batch 4", "5" = "Batch 5")))
+
+
+# plot the maximum growth rate (mumax)
+plot_mumax <- ggplot(coef_gompertz, aes(x = batch, y = mumax, fill = name, group = population)) +
+  geom_col(position = "dodge") +
+  xlab("") +
+  ylab(bquote("Max. growth rate"~(day^-1))) +
+  scale_fill_manual(values = c("#d2e0ee", "#efd0d4", "#90b2d5", "#d88b95", "#4d84bc","#c14655", "#2166ac","#b2182b"),
+                    name = "Population and\n temperature", guide = F,
+                    labels = as_labeller(c("1_20" = "Pop. 1 20°C", "1_38" = "Pop. 1 38°C",
+                                           "2_20" = "Pop. 2 20°C", "2_38" = "Pop. 2 38°C",
+                                           "3_20" = "Pop. 3 20°C", "3_38" = "Pop. 3 38°C",
+                                           "4_20" = "Pop. 4 20°C", "4_38" = "Pop. 4 38°C"))) +
+  #guides(fill = guide_legend(title.theme = element_text(size = small_font), label.theme = element_text(size = small_font))) +
+  theme(text = element_text(size = large_font),
+        panel.border = element_rect(colour = "black", fill = NA),
+        panel.background = element_blank(),
+        legend.position = "bottom",
+        #plot.margin = margin(t = 10, r = 10, b = 10, l = 10),
+        axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank()) + #,
+  facet_grid(~batch, scales = "free_x", 
+             labeller = as_labeller(c("1" = "Batch 1", "2" = "Batch 2", 
+                                      "3" = "Batch 3", "4" = "Batch 4", "5" = "Batch 5")))
+
+
+
+gompertz_fit_plot <-  ggplot(data = morphology_abundance_data_gompertz) +
+  geom_point(aes(x = batch_day, y = mean_density, group = population, colour = name), size = 1.5) +
+  geom_line(aes(x = batch_day, y = mean_density_predict, group = population, colour = name)) +
+  scale_y_log10() +
+  ylab("Population density (cells/ml)\n") +
+  xlab("Day\n") +
+  scale_color_manual(values = c("#d2e0ee", "#efd0d4", "#90b2d5", "#d88b95", "#4d84bc","#c14655", "#2166ac","#b2182b", "red", "blue"),
+                     name = "Population and\n temperature", guide = F,
+                     labels = as_labeller(c("1_20" = "Pop. 1 20°C", "1_38" = "Pop. 1 38°C",
+                                            "2_20" = "Pop. 2 20°C", "2_38" = "Pop. 2 38°C",
+                                            "3_20" = "Pop. 3 20°C", "3_38" = "Pop. 3 38°C",
+                                            "4_20" = "Pop. 4 20°C", "4_38" = "Pop. 4 38°C"))) +
+  scale_x_continuous(breaks = c(5, 10)) +
+  theme(text = element_text(size = large_font),
+        panel.background = element_blank(), panel.border = element_rect(colour = "black", fill = NA),
+        axis.line = element_line(colour = "black"),
+        legend.position = "bottom",
+        plot.margin = unit(c(0, 1.5, 0 , 1.5 ),"cm")) +
+  facet_grid(paste0("Batch ", batch) ~ paste0("Population ", lineage))
+
+
+# layout of the final figure
+layout <- "
+AA#
+AA#
+AA#
+BBD
+CCD"
+
+# create final figure with three facets
+plot_growth <- gompertz_fit_plot + plot_mumax + plot_lambda + guide_area() + plot_layout(guides = "collect", design = layout) + plot_annotation(tag_levels = 'A')
+
+# print figure
+plot_growth
+
+```
+
+
+## Temperature response modelling 
+
+#### Calculate the change in growth rate, lag phase and in morphological traits compared to the control.
+#### The control is the mean of the four populations in batch 1, growing at 20 °C.
+
+
+```{r new response data, warning=F, fig.height = 10, fig.width=12.5}
+
+# create variable merging batch, temperature and replicate; select only used variables
+growth_response_gompertz <- coef_gompertz %>% ungroup() %>% 
+  mutate(batch_temp = paste0("b", batch, "_", temperature, "_", replicate)) %>%
+  select(-population, -batch, - replicate, - temperature, -name)  
+
+# calculate % change in comparison to the same population lineage in batch 1
+growth_response_gompertz <- growth_response_gompertz %>% select(-y0, -K) %>% pivot_longer(cols = 1:2, names_to = "data_type")
+  
+growth_response_gompertz <- growth_response_gompertz %>% group_by(lineage, data_type) %>% pivot_wider(names_from = batch_temp, values_from = value)
+
+# calculate the difference in maximum growth rate and in lag phase duration in absolute values, not the % change since numbers are too large and interpretation is difficult
+growth_response_gompertz <- growth_response_gompertz %>% 
+  mutate(week2 = b2_38_NA - b1_20_NA,
+         week3_1 = b3_38_1 - b1_20_NA,
+         week3_2 = b3_38_2 - b1_20_NA,
+         week4 = b4_38_1 - b1_20_NA,
+         week5 = b5_38_1 - b1_20_NA,
+         week4_cold = b4_20_2 - b1_20_NA,
+         week5_cold = b5_20_2 - b1_20_NA)
+
+
+# tidy the data
+growth_response_gompertz <- growth_response_gompertz %>% select(1, 2, 11:17) %>% 
+  gather(key = "comparison", value = "percent_batch1", 3:9)
+
+
+# repeat the same calculations with the morphological traits
+
+# calculate mean cell area and cell aspect ratio in each batch
+morphology_data_batch <- morphology_abundance_data %>% drop_na(mean_area_day) %>%
+  group_by(population, lineage, batch, replicate, temperature) %>%
+  summarise(mean_area_batch = mean(mean_area_day), cv_area_batch = mean(cv_area_day), var_area_batch = mean(var_area_day),
+            mean_AR_batch = mean(mean_AR_day))
+
+# create variable combining batch, temperature and replicate; select only used variables
+morphology_response <- morphology_data_batch %>% ungroup() %>% 
+  mutate(batch_temp = paste0("b",batch, "_", temperature, "_", replicate)) %>%
+  select(lineage, batch_temp, mean_area_batch, mean_AR_batch, cv_area_batch, var_area_batch) 
+
+morphology_response <- morphology_response %>% gather(key = "data_type", value = "value", 3:6)
+
+morphology_response <- morphology_response %>% group_by(lineage, data_type) %>% spread(key = batch_temp, value = value)
+
+# calculate % change in comparison to the same population lineage in batch 1
+morphology_response <- morphology_response %>% group_by(lineage, data_type) %>% 
+  mutate(week2 = ((b2_38_NA - b1_20_NA) * 100) / b1_20_NA,
+         week3_1 = ((b3_38_1 - b1_20_NA)  * 100) / b1_20_NA,
+         week3_2 = ((b3_38_2 - b1_20_NA)  * 100) / b1_20_NA,
+         week4 = ((b4_38_1 - b1_20_NA)  * 100) / b1_20_NA,
+         week5 = ((b5_38_1 - b1_20_NA)  * 100) / b1_20_NA,
+         week4_cold = ((b4_20_2 - b1_20_NA)  * 100) / b1_20_NA,
+         week5_cold = ((b5_20_2 - b1_20_NA)  * 100) / b1_20_NA)
+
+morphology_response <- morphology_response %>% select(1, 2, 11:17) %>% 
+  gather(key = "comparison", value = "percent_batch1", 3:9)
+
+# merge growth and lag phase with the morphology data
+response_data <- rbind.data.frame(growth_response_gompertz, morphology_response)
+
+# add batch information
+response_data <- response_data %>% ungroup() %>% mutate(batch = case_when(
+  comparison == "week2" ~ 2,
+  comparison == "week3_1" ~ 3,
+  comparison == "week3_2" ~ 3,
+  comparison == "week4" ~ 4,
+  comparison == "week5" ~ 5,
+  comparison == "week4_cold" ~ 4,
+  comparison == "week5_cold" ~ 5
+))
+
+# add temperature information
+response_data <- response_data %>% mutate(temperature = case_when(
+  comparison == "week2" ~ 38,
+  comparison == "week3_1" ~ 38,
+  comparison == "week3_2" ~ 38,
+  comparison == "week4" ~ 38,
+  comparison == "week5" ~ 38,
+  comparison == "week4_cold" ~ 20,
+  comparison == "week5_cold" ~ 20
+))
+
+# add variable for lineage and temperature color
+response_data <- response_data %>% mutate(name = paste0(lineage, "_", temperature))
+
+
+# change data type into factor and change levels for a nicer looking plot
+response_data$data_type <- factor(response_data$data_type, levels = c("mumax", "lambda", 
+                                                                              "mean_area_batch", "cv_area_batch", "var_area_batch", 
+                                                                              "mean_AR_batch"))
+
+# transform lineage into categorical variable
+response_data$lineage <- as.character(response_data$lineage) 
+
+# look at the data
+ggplot(data = response_data, aes(x = batch, y = percent_batch1, color = name)) +
+  geom_point(alpha = 0.8, size = 2) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_color_manual(values = c("#d2e0ee", "#efd0d4", "#90b2d5", "#d88b95", "#4d84bc","#c14655", "#2166ac","#b2182b", "#878787"),
+                     name = "Population and\n temperature", 
+                     labels = as_labeller(c("1_20" = "Pop. 1 20°C", "1_38" = "Pop. 1 38°C",
+                                            "2_20" = "Pop. 2 20°C", "2_38" = "Pop. 2 38°C",
+                                            "3_20" = "Pop. 3 20°C", "3_38" = "Pop. 3 38°C",
+                                            "4_20" = "Pop. 4 20°C", "4_38" = "Pop. 4 38°C"))) +
+  ylab("Change compared to control (%)") +
+  xlab("Batch culture") +
+  guides(fill = guide_legend(title.theme = element_text(size = 15), 
+                             label.theme = element_text(size = 15))) +
+  theme(text = element_text(size = 15), 
+        panel.border = element_rect(colour = "black", fill = NA),
+        panel.background = element_blank(),
+        legend.position = "bottom") +
+  facet_wrap(~data_type, ncol = 3, labeller = as_labeller(c("mumax" = "Growth rate",
+                                                            "lambda" = "Lag phase",
+                                                            "cv_area_batch" = "CV cell size",
+                                                            "mean_AR_batch" = "Cell shape",
+                                                            "mean_area_batch" = "Cell size",
+                                                            "var_area_batch" = "Variance cell size")), scales = "free_y") 
+
+```
+
+#### Model the response with Bayesian mixed-effects models using the package MCMCglmm.
+#### 1) Response of the populations that grew at 38 °C.
+
+```{r MCMCglmm model 38 °C new, warning=F, message = F, fig.height = 10, fig.width=12.5}
+
+# load the libraries
+library(MCMCglmm)
+library(coda)
+library(purrr)
+
+set.seed(1)
+
+# select the populations that experienced 38 °C
+response_data_38 <- response_data %>% filter(temperature == 38)
+
+# create variable for time difference since warming started
+response_data_38 <- response_data_38 %>% mutate(batches_38 = batch - 2)
+
+# create a list with the prior information, using an uninformative prior
+prior_1 <- list(R = list(V = 1, nu = 0.002), 
+                G = list(G1 = list(V = 1, nu = 0.002)))
+
+# run one separate model for each of the 5 response variables
+models_38 <- response_data_38 %>% group_by(data_type) %>% nest() %>%
+  mutate(mixed_model = map(data, ~MCMCglmm(fixed = percent_batch1 ~ batches_38, 
+                                           random = ~lineage, 
+                                           data = ., 
+                                           family = "gaussian",
+                                           prior = prior_1, 
+                                           nitt = 2000000, 
+                                           burnin = 30000, 
+                                           thin = 1000, verbose = F)))
+
+
+# create new data
+new_data <- data.frame(expand.grid(lineage = c("1"), batches_38 = c(0:3), 
+                       percent_batch1 = 0))
+
+# get confidence interval from each model
+models_38 <- models_38 %>% mutate(predictions = map(mixed_model, ~predict.MCMCglmm(object = .,
+                                                               newdata = new_data,
+                                                               interval = "confidence")))
+models_38 <- models_38 %>% mutate(predictions = map(.x = predictions, ~as_tibble(.)))
+
+# merge new data and model fit for plotting
+models_38 <- models_38 %>% mutate(predictions = map(.x = predictions, ~cbind(new_data, .))) 
+
+# store models in a separate object
+model_38_predictions <- unnest(models_38, predictions)
+
+# plot the data and the model 
+response_38_plot <- ggplot(data = response_data_38, aes(x = batch, y = percent_batch1, color = name)) +
+  geom_point(aes(color = as.factor(lineage)), alpha = 0.8, size = 2) +
+  geom_smooth(data = model_38_predictions, aes(x = batches_38 + 2, y = fit, ymin = lwr, ymax = upr), colour = "black", stat = "identity") +
+  geom_hline(yintercept  = 0, linetype = "dashed") +
+  #scale_y_continuous(limits = c(-95, 95)) +
+  xlab("Batch") +
+  ylab("Change in comparison to control (%)") +
+  scale_color_manual(values = c("#efd0d4", "#d88b95","#c14655","#b2182b"),
+                     name = "Population", labels = as_labeller(c( "1" = "Pop. 1",
+                                                                  "2" = "Pop. 2",
+                                                                  "3" = "Pop. 3",
+                                                                  "4" = "Pop. 4"))) +
+  theme(text = element_text(size = 15), plot.title = element_text(hjust = 0.5, margin = unit(c(0.5,0.5,0.5,0.5), "lines")),
+        panel.border = element_rect(colour = "black", fill = NA),
+        panel.background = element_blank(),
+        legend.position = "bottom") +
+  facet_wrap(~data_type, ncol = 3, labeller = as_labeller(c("mumax" = "Growth rate",
+                                                            "lambda" = "Lag phase",
+                                                            "cv_area_batch" = "CV cell size",
+                                                            "mean_AR_batch" = "Cell shape",
+                                                            "mean_area_batch" = "Cell size",
+                                                            "var_area_batch" = "Variance cell size")), scales = "free_y") 
+
+response_38_plot
+ 
+```
+
+#### 2) Response of the populations that, after adaptation to 38 °C, returned to the control temperature of 20 °C.
+
+```{r MCMCglmm model 20°C new, warning=F, message = F, fig.height = 10, fig.width = 12.5}
+
+# select the populations that experienced 20 °C
+response_data_20 <- response_data %>% filter(temperature == 20)
+
+# create variable for time difference since return to 20 °C started
+response_data_20 <- response_data_20 %>% mutate(batches_20 = batch - 4)
+
+# create a list with the prior information, using an uninformative prior
+# same prior as 38°C models
+prior_1_new <- list(R = list(V = 1, nu = 0.002), 
+                G = list(G1 = list(V = 1, nu = 0.002)))
+
+# run one separate model for each of the 5 response variables
+models_20 <- response_data_20 %>% group_by(data_type) %>% nest() %>%
+  mutate(mixed_model = map(data, ~MCMCglmm(fixed = percent_batch1 ~ batches_20, 
+                                           random = ~lineage, 
+                                           data = ., 
+                                           family = "gaussian",
+                                           prior = prior_1_new, 
+                                           nitt = 2000000,
+                                           burnin = 30000, 
+                                           thin = 1000,
+                                           verbose = F)))
+
+# create new data
+new_data_20 <- data.frame(expand.grid(lineage = c("1"), batches_20 = c(0, 1), 
+                       percent_batch1 = 0))
+
+# get confidence interval from each model
+models_20 <- models_20 %>% mutate(predictions = map(mixed_model, ~predict.MCMCglmm(object = .,
+                                                               newdata = new_data_20,
+                                                               interval = "confidence")))
+models_20 <- models_20 %>% mutate(predictions = map(.x = predictions, ~as_tibble(.)))
+
+# merge new data and model fit for plotting
+models_20 <- models_20 %>% mutate(predictions = map(.x = predictions, ~cbind(new_data_20, .))) 
+
+# store models in a separate object
+model_20_predictions <- unnest(models_20, predictions)
+
+# plot the data and the model 
+response_20_plot <- ggplot(data = response_data_20, aes(x = batch, y = percent_batch1, color = name)) +
+  geom_point(aes(color = as.factor(lineage)), alpha = 0.8, size = 2) +
+  geom_smooth(data = model_20_predictions,
+              aes(x = batches_20 + 4, y = fit, ymin = lwr, ymax = upr), 
+              colour = "black", stat = "identity") +
+  geom_hline(yintercept  = 0, linetype = "dashed") +
+  scale_x_continuous(breaks = c(4, 5)) +
+  xlab("Batch") +
+  ylab("Change in comparison to control (%)") +
+  scale_color_manual(values = c("#d2e0ee", "#90b2d5", "#4d84bc", "#2166ac"),
+                     name = "Population", 
+                     labels = as_labeller(c( "1" = "Pop. 1",
+                                             "2" = "Pop. 2",
+                                             "3" = "Pop. 3",
+                                             "4" = "Pop. 4"))) +
+  theme(text = element_text(size = 15), plot.title = element_text(hjust = 0.5, margin = unit(c(0.5,0.5,0.5,0.5), "lines")),
+        panel.border = element_rect(colour = "black", fill = NA),
+        panel.background = element_blank(),
+        legend.position = "bottom") +
+  facet_wrap(~data_type, ncol = 3, labeller = as_labeller(c("mumax" = "Growth rate",
+                                                            "lambda" = "Lag phase",
+                                                            "cv_area_batch" = "CV cell size",
+                                                            "mean_AR_batch" = "Cell shape",
+                                                            "mean_area_batch" = "Cell size",
+                                                            "var_area_batch" = "Variance cell size")), scales = "free_y") 
+
+
+response_20_plot
+ 
+```
+
+##### Check the convergence of the MCMC chains.
+##### 1) Response to 38 °C models
+
+```{r MCMC control 38°C new,  warning = F, fig.height = 4, fig.width = 5, fig.align="center", include = F}
+
+# store MCMC results in a separate object
+models_38_MCMC <- models_38[[3]]
+
+# name each MCMC run with the variable name
+models_38_MCMC <- set_names(models_38_MCMC, models_38$data_type)
+
+# check autocorrelation of the iterations, should be less than 0.1
+map(models_38_MCMC, "Sol") %>% as.mcmc() %>% autocorr()
+map(models_38_MCMC, "VCV") %>% as.mcmc() %>% autocorr()
+
+# plot trace 
+plot(models_38_MCMC$mumax$Sol)
+plot(models_38_MCMC$lambda$Sol)
+plot(models_38_MCMC$mean_area_batch$Sol)
+plot(models_38_MCMC$cv_area_batch$Sol)
+plot(models_38_MCMC$var_area_batch$Sol)
+plot(models_38_MCMC$mean_AR_batch$Sol)
+
+
+plot(log10(models_38_MCMC$mumax$VCV))
+plot(log10(models_38_MCMC$lambda$VCV))
+plot(log10(models_38_MCMC$mean_area_batch$VCV))
+plot(log10(models_38_MCMC$cv_area_batch$VCV))
+plot(log10(models_38_MCMC$var_area_batch$VCV))
+plot(log10(models_38_MCMC$mean_AR_batch$VCV))
+
+```
+
+##### 2) Response to 20 °C models
+
+```{r MCMC control 20°C new,  warning = F, fig.height = 4, fig.width = 5, fig.align="center", include = F}
+# store MCMC results in a separate object
+models_20_MCMC <- models_20[[3]]
+
+# name each MCMC run with the variable name
+models_20_MCMC <- set_names(models_20_MCMC, models_20$data_type)
+
+# check autocorrelation of the iterations, should be less than 0.1
+map(models_20_MCMC, "Sol") %>% as.mcmc() %>% autocorr()
+map(models_20_MCMC, "VCV") %>% as.mcmc() %>% autocorr()
+
+# plot trace 
+plot(models_20_MCMC$mumax$Sol)
+plot(models_20_MCMC$lambda$Sol)
+plot(models_20_MCMC$mean_area_batch$Sol)
+plot(models_20_MCMC$cv_area_batch$Sol)
+plot(models_20_MCMC$var_area_batch$Sol)
+plot(models_20_MCMC$mean_AR_batch$Sol)
+
+
+plot(log10(models_20_MCMC$mumax$VCV))
+plot(log10(models_20_MCMC$lambda$VCV))
+plot(log10(models_20_MCMC$mean_area_batch$VCV))
+plot(log10(models_20_MCMC$cv_area_batch$VCV))
+plot(log10(models_20_MCMC$var_area_batch$VCV))
+plot(log10(models_20_MCMC$mean_AR_batch$VCV))
+
+```
+
+### Fig. 5 Change in population dynamics and morphological traits of *T. thermophila* populations. 
+#### Change in maximum growth rate, lag phase, cell size, variance of cell size, coefficient of variation (CV) of cell size and cell shape are shown, for each population and for each batch separately, using the control cultures at 20 °C in batch 1 as a reference. Maximum growth rate difference is expressed in day-1 and lag phase difference is expressed in days, while all other values are expressed as percent difference. The lines represent the fitted mixed effects models and the shaded areas represent the 95 % credible interval (see methods for details). The colors indicate the temperature in which the population was grown, and the shades represent the population replicate. The dashed lines mark no change in comparison to the control.
+```{r fig 5, warning = F, fig.height = 10, fig.width = 12.5}
+
+# plot both models in the same plot with all the response data
+
+response_plot <- ggplot(data = filter(response_data, data_type != "K"), aes(x = batch, y = percent_batch1, color = name)) +
+  geom_point(alpha = 0.8, size = 2) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_color_manual(values = c("#d2e0ee", "#efd0d4", "#90b2d5", "#d88b95", "#4d84bc","#c14655", "#2166ac","#b2182b"),
+                     name = "Population and\n temperature", 
+                     labels = as_labeller(c("1_20" = "Pop. 1 20°C", "1_38" = "Pop. 1 38°C",
+                                            "2_20" = "Pop. 2 20°C", "2_38" = "Pop. 2 38°C",
+                                            "3_20" = "Pop. 3 20°C", "3_38" = "Pop. 3 38°C",
+                                            "4_20" = "Pop. 4 20°C", "4_38" = "Pop. 4 38°C"))) +
+  geom_smooth(data = model_20_predictions %>% filter(data_type != "K"),
+              aes(x = batches_20 + 4, y = fit, ymin = lwr, ymax = upr), alpha = 0.2, colour = "#82a8d0", stat = "identity") +
+  geom_smooth(data = model_38_predictions %>% filter(data_type != "K"), 
+              aes(x = batches_38 + 2, y = fit, ymin = lwr, ymax = upr), alpha = 0.2, colour = "#d37d88", stat = "identity") +
+  geom_hline(yintercept  = 0, linetype = "dashed") +
+  xlab("Batch") +
+  ylab("Change in comparison to control (%)") +
+  theme(text = element_text(size = 15),
+        panel.border = element_rect(colour = "black", fill = NA),
+        panel.background = element_blank(),
+        legend.position = "bottom",
+        plot.margin = unit(c(1.5, 1.5, 1.5 ,1.5 ),"cm")) +
+  facet_wrap(~data_type, ncol = 3,  labeller = as_labeller(c("mumax" = "Growth rate",
+                                                            "lambda" = "Lag phase",
+                                                            "cv_area_batch" = "CV cell size",
+                                                            "mean_AR_batch" = "Cell shape",
+                                                            "mean_area_batch" = "Cell size",
+                                                            "var_area_batch" = "Variance cell size")), scales = "free_y") 
+
+response_plot
+
+```
+
+##### Table with response estimates and confidence interval for each variable at the final experiment batch.
+
+```{r}
+model_38_predictions %>% group_by(data_type) %>% select(-percent_batch1, -lineage) %>% filter(batches_38 == 3)
+model_38_predictions %>% group_by(data_type) %>% select(-percent_batch1, -lineage) %>% filter(batches_38 == 0)
+model_20_predictions %>% group_by(data_type) %>% select(-percent_batch1, -lineage) %>% filter(batches_20 == 1)
+
+```
+
+
