@@ -1,7 +1,7 @@
 # create metadata for Dryad submission
 
 # install dmdScheme
-install.packages("dmdScheme")
+#install.packages("dmdScheme")
 remotes::install_github("Exp-Micro-Ecol-Hub/dmdScheme", ref = "master")
 
 
@@ -24,7 +24,7 @@ scheme_list()
 scheme_use("emeScheme", "0.9.5")
 
 # enter the metadata
-open_new_spreadsheet(format = FALSE)
+open_new_spreadsheet(format = T)
 
 x <- read_excel(
   file = "/Users/vanessaweberdemelo/Documents/GitHub/Temperature_response_Tetrahymena/2-code/emeScheme_0.9.5_temperature_choice.xlsx",
