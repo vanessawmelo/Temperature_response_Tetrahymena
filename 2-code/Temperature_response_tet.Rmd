@@ -58,6 +58,7 @@ Temperature_ranges_plot <- ggplot(data = temperature_range_data, aes(x = day, y 
   scale_color_manual(name = "Temperature (°C)", 
                      values = c('#053061', '#2166ac', '#4393c3', '#92c5de',
                                 '#d1e5f0','#fddbc7','#f4a582','#d6604d','#b2182b', '#67001f')) +
+  scale_x_continuous(breaks = c(5, 10)) +
   theme(text = element_text(size = 15),
         panel.background = element_blank(),
         axis.line = element_line(colour = "black"),
@@ -92,10 +93,10 @@ morphology_data <- read_csv(here("1-data/TempAdapt_morphology_dryad.csv"))
 
 ```{r number sampled cells}
 
-# total number of cells
+# total number of cells measured
 unique(morphology_data$id) %>% length()
 
-# mean number of cells plus standard error
+# mean number of cells measured per day plus standard error
 cells_summary <- morphology_data %>% group_by(population, date) %>% summarise(measured_cells = n())
 
 cells_summary %>% ungroup() %>% summarise(mean_measured_cells = mean(measured_cells), se_measured_cells = sd(measured_cells)/sqrt(n()))
@@ -106,7 +107,7 @@ cells_summary %>% ungroup() %>% summarise(mean_measured_cells = mean(measured_ce
 
 ```{r calculate mean, var and se}
 
-# calculate mean, variance and sd of area and AR for each population for each day
+# calculate mean, variance and sd of area and aspect ratio (AR) for each population for each day
 
 morphology_data_ts <- morphology_data %>% group_by(population, lineage, batch, date, day, temperature) %>%
   summarise(mean_area_day = mean(mean_area), sd_area_day = sd(mean_area), 
@@ -141,11 +142,12 @@ morphology_abundance_data <- morphology_abundance_data %>% mutate(name = paste0(
 
 ```{r calculate generations, warning=F, message=F}
 
-# number of generations per batch ####
+# number of generations per population per batch
 generations <- morphology_abundance_data %>% group_by(population, lineage, batch,replicate, temperature) %>% 
   summarise(maxi_density = max(mean_density), min_density = min(mean_density),
             number_generations = (log(max(mean_density)) - log(min(mean_density)))/log(2))
 
+# mean number of generations per batch per temperature
 generations_summary <- generations %>% group_by(batch, temperature) %>% summarise(mean_generations_batch = mean(number_generations))
 
 # create a tibble with the number of generations per batch at each temperature
@@ -166,7 +168,8 @@ generations_summary <- generations_summary %>% mutate(text_plot = case_when(
 # define size of small and large fonts for the plot
 small_font <- 10
 large_font <- 13
-  
+
+# plot population abundances through time  
 plot_abundances <- ggplot(data = morphology_abundance_data) +
   geom_point(aes(x = batch_day, y = mean_density, group = population, colour = name), size = 1) + 
   geom_line(aes(x = batch_day, y = mean_density, group = population, colour = name)) +
@@ -340,6 +343,7 @@ all_time_series
 ##### Estimate growth rate and lag phase in each population using the Gompertz model. 
 
 ```{r gompertz model, warning=F, message=F}
+
 # load the package growthrates
 library(growthrates)
 
@@ -368,7 +372,7 @@ subset1_gompertz3 <- all_growthmodels(
 
 ##### Check model fit and coeficients.
 
-```{r check gompertz model, warning=F, message=F, include = T}
+```{r check gompertz model, warning=F, message=F, include = T, eval = F}
 # check the rsquared of the models
 
 # r squared of the model
@@ -388,7 +392,7 @@ plot(subset1_gompertz3, log = "y")
 
 #### Gompertz model for populations that need specific parameters
 
-```{r gompertz model difficult fitting pop, warning=F, fig.height = 5, fig.width=12.5}
+```{r gompertz model difficult fitting pop, warning=F, message=F, fig.height = 5, fig.width=12.5}
 
 # populations 32, 141, 341 presented suboptimal fittings with the above parameters
 # model these populations separately
@@ -415,6 +419,7 @@ p2     <- c(y0 = 500,    mumax = 1, K = 1000000, lambda = 0.1)
 lower2 <- c(y0 = 0,      mumax = 0,   K = 100000,   lambda = 0)
 upper2 <- c(y0 = 10000,   mumax = 30,  K = 5000000, lambda = 4)
 
+# run model for population 141
 pop141_gompertz <- fit_growthmodel(FUN = grow_gompertz3, p = p,
                                    pop141$batch_day, pop141$mean_density,
                                    lower = lower, upper = upper)
@@ -428,6 +433,7 @@ pop341 <- morphology_abundance_data %>%
 
 # rsquared of the model is very low, manually estimate growth rate and lag phase
 
+# select relevant days
 pop341_day0 <- pop341 %>% filter(batch_day == 0)
 pop341_day3 <- pop341 %>% filter(batch_day == 3)
 
@@ -438,6 +444,7 @@ y0 <- NA
 K <- NA
 population <- 341
 
+# store growth parameters in single object
 pop341_manual_growth <- tibble(mumax, lambda, y0, K, population)
 
 
@@ -447,7 +454,9 @@ remove(mumax, lambda, y0, K, population)
 
 ##### Check model fit and coeficients.
 
-```{r check gompertz model difficult fittings, warning=F, message=F, include = T}
+```{r check gompertz model difficult fittings, warning=F, message=F, eval = F, include = T}
+
+# check model fit and coeficients
 
 # pop 32
 rsquared(pop32_gompertz)
@@ -470,7 +479,7 @@ plot(pop141_gompertz, log = "y")
 
 ```{r predictions gompertz model, warning=F, message=F, include = T}
 
-# try to get the model predictions for all gompertz models
+# get the model predictions for all gompertz models
 
 # new time variable with the maximum batch_day across all populations (12)
 time <- data.frame(time = seq(from = 0, to = 12, by = 1))
@@ -481,7 +490,6 @@ pop141_growth_prediction <- pop141_gompertz %>% predict(newdata = time) %>% as_t
 
 # predict function for each the remaining populations
 subset1_growth_prediction <- predict(subset1_gompertz3, newdata = time)
-names(subset1_growth_prediction)
 
 # transform list into data frame with population as a column
 subset1_growth_prediction <- map_df(subset1_growth_prediction, ~as.data.frame(.x), .id = "population")
@@ -493,6 +501,7 @@ subset1_growth_prediction <- subset1_growth_prediction %>% dplyr::rename(batch_d
 prediction_gompertz <- bind_rows(subset1_growth_prediction, pop32_growth_prediction, pop141_growth_prediction)
 prediction_gompertz$population <- as.numeric(prediction_gompertz$population)
 
+# add growth model predictions to main dataset
 morphology_abundance_data_gompertz <- morphology_abundance_data %>% left_join(prediction_gompertz)
 
 
@@ -500,12 +509,11 @@ morphology_abundance_data_gompertz <- morphology_abundance_data %>% left_join(pr
 
 #### Merge all growth model estimates
 
-```{r tidy growth data, warning=F}
+```{r tidy growth data, warning=F, message = F}
 
 # create a dataset with the coeficients of the model
 coef_gompertz <- coef(subset1_gompertz3) %>% as_tibble()
 coef_gompertz <- cbind(coef_gompertz, population = as.double(names(subset1_gompertz3)))
-
 coef_gompertz <- coef_gompertz %>% rbind(c(coef(pop32_gompertz),  32))
 coef_gompertz <- coef_gompertz %>% rbind(c(coef(pop141_gompertz),  141))
 coef_gompertz <- coef_gompertz %>% rbind(pop341_manual_growth)
@@ -627,7 +635,7 @@ plot_growth
 #### The control is the mean of the four populations in batch 1, growing at 20 °C.
 
 
-```{r new response data, warning=F, fig.height = 10, fig.width=12.5}
+```{r response data, warning=F, fig.height = 10, fig.width=12.5}
 
 # create variable merging batch, temperature and replicate; select only used variables
 growth_response_gompertz <- coef_gompertz %>% ungroup() %>% 
@@ -759,6 +767,7 @@ library(MCMCglmm)
 library(coda)
 library(purrr)
 
+# set seed
 set.seed(1)
 
 # select the populations that experienced 38 °C
@@ -822,7 +831,7 @@ response_38_plot <- ggplot(data = response_data_38, aes(x = batch, y = percent_b
                                                             "mean_AR_batch" = "Cell shape",
                                                             "mean_area_batch" = "Cell size",
                                                             "var_area_batch" = "Variance cell size")), scales = "free_y") 
-
+# print the plot
 response_38_plot
  
 ```
@@ -897,7 +906,7 @@ response_20_plot <- ggplot(data = response_data_20, aes(x = batch, y = percent_b
                                                             "mean_area_batch" = "Cell size",
                                                             "var_area_batch" = "Variance cell size")), scales = "free_y") 
 
-
+# print the plot
 response_20_plot
  
 ```
@@ -905,7 +914,7 @@ response_20_plot
 ##### Check the convergence of the MCMC chains.
 ##### 1) Response to 38 °C models
 
-```{r MCMC control 38°C new,  warning = F, fig.height = 4, fig.width = 5, fig.align="center", include = F}
+```{r MCMC control 38°C,  warning = F, message = F, eval = F, fig.height = 4, fig.width = 5, fig.align="center", include = T}
 
 # store MCMC results in a separate object
 models_38_MCMC <- models_38[[3]]
@@ -937,7 +946,7 @@ plot(log10(models_38_MCMC$mean_AR_batch$VCV))
 
 ##### 2) Response to 20 °C models
 
-```{r MCMC control 20°C new,  warning = F, fig.height = 4, fig.width = 5, fig.align="center", include = F}
+```{r MCMC control 20°C,  warning = F, eval = F, fig.height = 4, fig.width = 5, fig.align="center", include = T}
 # store MCMC results in a separate object
 models_20_MCMC <- models_20[[3]]
 
@@ -1000,6 +1009,7 @@ response_plot <- ggplot(data = filter(response_data, data_type != "K"), aes(x = 
                                                             "mean_area_batch" = "Cell size",
                                                             "var_area_batch" = "Variance cell size")), scales = "free_y") 
 
+# print plot
 response_plot
 
 ```
@@ -1012,5 +1022,3 @@ model_38_predictions %>% group_by(data_type) %>% select(-percent_batch1, -lineag
 model_20_predictions %>% group_by(data_type) %>% select(-percent_batch1, -lineage) %>% filter(batches_20 == 1)
 
 ```
-
-
